@@ -1,4 +1,57 @@
+```
+# Dependencies
 node_modules/
+
+# Environment variables
 .env
+
+# Build artifacts
 dist/
+build/
+*.js.map
+*.d.ts.map
+
+# TypeScript
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
 *.log
+
+# Temporary files
+*.tmp
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Compression
+*.zip
+*.gz
+*.tar
+*.tgz
+*.bz2
+*.xz
+*.7z
+*.rar
+*.zst
+*.lz4
+*.lzh
+*.cab
+*.arj
+*.rpm
+*.deb
+*.Z
+*.lz
+*.lzo
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tar.zst
+
+```node_modules/

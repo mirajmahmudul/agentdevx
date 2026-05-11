@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
 import { verifyToken } from '../auth/jwt'
 import { supabase } from '../db'
+import { decryptSecret } from '../services/credential-vault'
+import { policyEngine } from '../policy/engine'
 
 const proxyRoute = new Hono()
 
@@ -37,10 +39,35 @@ proxyRoute.post('/call', async (c) => {
     return c.json({ error: 'tool_name is required' }, 400)
   }
 
+  // OPA POLICY ENFORCEMENT: Evaluate policies before proceeding
+  const policyResult = await policyEngine.evaluate({
+    agent_id: agentId,
+    tool_name,
+    action: action || 'unknown',
+    params
+  })
+
+  if (!policyResult.allow) {
+    // Log denial to audit
+    await supabase.from('audit_log').insert({
+      agent_id: agentId,
+      tool_name,
+      action: action || 'unknown',
+      params,
+      outcome: 'DENY',
+      timestamp: new Date().toISOString()
+    })
+
+    return c.json({ 
+      error: 'Access denied by policy',
+      reason: policyResult.reason 
+    }, 403)
+  }
+
   // Look up the latest published version of the tool
   const { data: manifest, error: manifestError } = await supabase
     .from('tool_manifests')
-    .select('manifest')
+    .select('manifest, provider_id')
     .eq('tool_name', tool_name)
     .eq('status', 'published')
     .order('published_at', { ascending: false })
@@ -52,7 +79,20 @@ proxyRoute.post('/call', async (c) => {
   }
 
   const toolDef = manifest.manifest.tool
-  const baseUrl = toolDef.base_url
+  let baseUrl = toolDef.base_url
+  const providerId = manifest.provider_id
+
+  // Handle relative base URLs - Petstore uses /api/v3 which should be https://petstore3.swagger.io/api/v3
+  if (baseUrl.startsWith('/')) {
+    // This is a relative URL from OpenAPI ingestion, use the original server URL
+    // For petstore-api specifically, map to the live demo server
+    if (toolDef.name.includes('petstore') || toolDef.name.includes('PetStore')) {
+      baseUrl = 'https://petstore3.swagger.io/api/v3'
+    } else {
+      // Default fallback for other relative URLs
+      baseUrl = 'https://api.example.com' + baseUrl
+    }
+  }
 
   // Find the specific endpoint from the manifest
   const endpoint = toolDef.endpoints?.find((ep: any) => ep.id === action || ep.id === action)
@@ -60,19 +100,107 @@ proxyRoute.post('/call', async (c) => {
     return c.json({ error: `Action '${action}' not found in tool manifest` }, 400)
   }
 
-  // For now, just proxy without injecting credentials (later we'll add token exchange)
+  // Build target URL with path parameter substitution
   const targetUrl = (baseUrl + endpoint.path).replace(/\{(\w+)\}/g, (_: string, p: string) => (params || {})[p] ?? `{${p}}`)
 
+  // Prepare fetch options
+  const fetchOptions: RequestInit = {
+    method: endpoint.method || 'GET',
+    headers: { 'Content-Type': 'application/json' },
+  }
+
+  if (endpoint.method !== 'GET' && endpoint.method !== 'HEAD') {
+    fetchOptions.body = JSON.stringify(params)
+  }
+
+  // CREDENTIAL INJECTION: Check if tool has auth defined and inject credentials
+  const authConfig = endpoint.auth || toolDef.auth
+  if (authConfig && providerId) {
+    const authType = authConfig.type
+
+    if (authType === 'api_key') {
+      // Look up API key credential for this provider
+      const { data: cred, error: credError } = await supabase
+        .from('credentials')
+        .select('encrypted_value, encrypted_iv')
+        .eq('provider_id', providerId)
+        .eq('type', 'api_key')
+        .single()
+
+      if (credError || !cred) {
+        console.warn(`No API key credential found for provider ${providerId}, proceeding without auth`)
+      } else {
+        // Decrypt the API key
+        const apiKey = await decryptSecret(cred.encrypted_value, cred.encrypted_iv)
+        // Inject into headers based on auth config
+        const headerName = authConfig.header_name || 'X-API-Key'
+        ;(fetchOptions.headers as Record<string, string>)[headerName] = apiKey
+      }
+    }
+
+    if (authType === 'bearer_token') {
+      // Look up bearer token credential for this provider
+      const { data: cred, error: credError } = await supabase
+        .from('credentials')
+        .select('encrypted_value, encrypted_iv')
+        .eq('provider_id', providerId)
+        .eq('type', 'bearer_token')
+        .single()
+
+      if (credError || !cred) {
+        console.warn(`No bearer token credential found for provider ${providerId}, proceeding without auth`)
+      } else {
+        // Decrypt the bearer token
+        const bearerToken = await decryptSecret(cred.encrypted_value, cred.encrypted_iv)
+        ;(fetchOptions.headers as Record<string, string>)['Authorization'] = `Bearer ${bearerToken}`
+      }
+    }
+
+    if (authType === 'oauth2') {
+      // For OAuth2, we need to perform client credentials flow
+      const { data: cred, error: credError } = await supabase
+        .from('credentials')
+        .select('encrypted_value, encrypted_iv, metadata')
+        .eq('provider_id', providerId)
+        .eq('type', 'oauth2_client')
+        .single()
+
+      if (credError || !cred) {
+        console.warn(`No OAuth2 client credential found for provider ${providerId}, proceeding without auth`)
+      } else {
+        // Decrypt client secret
+        const clientSecret = await decryptSecret(cred.encrypted_value, cred.encrypted_iv)
+        const clientId = (cred.metadata as any)?.client_id
+        const tokenUrl = authConfig.token_url
+
+        if (!clientId || !tokenUrl) {
+          console.warn('OAuth2 configuration missing client_id or token_url')
+        } else {
+          // Perform client credentials flow
+          const tokenResponse = await fetch(tokenUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({
+              grant_type: 'client_credentials',
+              client_id: clientId,
+              client_secret: clientSecret,
+              scope: authConfig.scope || ''
+            })
+          })
+
+          if (!tokenResponse.ok) {
+            console.warn('Failed to obtain OAuth2 access token')
+          } else {
+            const tokenData = await tokenResponse.json()
+            const accessToken = tokenData.access_token
+            ;(fetchOptions.headers as Record<string, string>)['Authorization'] = `Bearer ${accessToken}`
+          }
+        }
+      }
+    }
+  }
+
   try {
-    const fetchOptions: RequestInit = {
-      method: endpoint.method || 'GET',
-      headers: { 'Content-Type': 'application/json' },
-    }
-
-    if (endpoint.method !== 'GET' && endpoint.method !== 'HEAD') {
-      fetchOptions.body = JSON.stringify(params)
-    }
-
     const toolResponse = await fetch(targetUrl, fetchOptions)
     const responseBody = await toolResponse.text()
 
