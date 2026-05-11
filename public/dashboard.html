@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>AgentDevX – Provider Dashboard</title>
+  <style>
+    body { font-family: system-ui; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { color: #2563eb; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #e5e7eb; }
+    th { background: #f3f4f6; }
+    tr:hover { background: #f9fafb; }
+    .manifest-preview { max-height: 200px; overflow: auto; background: #f0f0f0; padding: 0.5rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>AgentDevX – Published Tools</h1>
+  <div id="error" style="color: red;"></div>
+  <table id="tools-table">
+    <thead><tr><th>Tool Name</th><th>Version</th><th>Provider</th><th>Manifest</th></tr></thead>
+    <tbody id="tools-body"></tbody>
+  </table>
+
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+
+    const SUPABASE_URL = 'https://mwoiwaxeraaknkutrtfz.supabase.co'     // ← replace with your real Supabase URL
+    const SUPABASE_ANON_KEY = 'sb_publishable_-nX09TzNS97rg0p1bB-GZg_F2TL0hsA'                  // ← replace with your anon key
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
+
+    async function loadTools() {
+      const { data, error } = await supabase
+        .from('tool_manifests')
+        .select('id, tool_name, version, provider_id, manifest')
+        .eq('status', 'published')
+        .order('published_at', { ascending: false })
+
+      const tbody = document.getElementById('tools-body')
+      const errDiv = document.getElementById('error')
+      if (error) {
+        errDiv.textContent = 'Error loading tools: ' + error.message
+        return
+      }
+      if (!data || data.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4">No tools published yet.</td></tr>'
+        return
+      }
+      tbody.innerHTML = data.map(tool => `
+        <tr>
+          <td>${escapeHtml(tool.tool_name)}</td>
+          <td>${escapeHtml(tool.version)}</td>
+          <td>${escapeHtml(tool.provider_id)}</td>
+          <td>
+            <details>
+              <summary>View</summary>
+              <div class="manifest-preview">${escapeHtml(JSON.stringify(tool.manifest, null, 2))}</div>
+            </details>
+          </td>
+        </tr>
+      `).join('')
+    }
+
+    function escapeHtml(text) {
+      const div = document.createElement('div')
+      div.textContent = text
+      return div.innerHTML
+    }
+
+    loadTools()
+  </script>
+</body>
+</html>
