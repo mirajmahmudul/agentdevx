@@ -9,8 +9,12 @@ import { policiesRoute } from './routes/policies'
 import { billingRoute } from './routes/billing'
 import { supabase } from './db'
 import { rateLimiter } from 'hono-rate-limiter'
+import { bodyLimit } from 'hono/body-limit'
 
 const app = new Hono()
+
+// Request size limit middleware (1MB max)
+app.use('*', bodyLimit({ maxSize: 1024 * 1024 }))
 
 // Rate limiting middleware
 app.use('/proxy/*', rateLimiter({ windowMs: 60000, max: 100 }))
