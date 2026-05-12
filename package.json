@@ -12,10 +12,13 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@open-policy-agent/opa-wasm": "^1.10.0",
     "@supabase/supabase-js": "^2.105.4",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
     "hono": "^4.12.17",
+    "hono-rate-limiter": "^0.5.3",
+    "stripe": "^22.1.1",
     "yaml": "^2.8.4",
     "zod": "^4.4.3"
   }
