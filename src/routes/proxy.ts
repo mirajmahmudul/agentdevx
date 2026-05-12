@@ -6,6 +6,61 @@ import { policyEngine } from '../policy/engine'
 
 const proxyRoute = new Hono()
 
+/**
+ * Get agent's usage count for the last 30 days
+ */
+async function getAgentUsage(agentId: string): Promise<number> {
+  const thirtyDaysAgo = new Date()
+  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30)
+
+  const { count, error } = await supabase
+    .from('audit_log')
+    .select('*', { count: 'exact', head: true })
+    .eq('agent_id', agentId)
+    .gte('timestamp', thirtyDaysAgo.toISOString())
+
+  if (error) {
+    console.error('Error fetching agent usage:', error)
+    return 0
+  }
+
+  return count || 0
+}
+
+/**
+ * Check if agent has exceeded their tier limit
+ * Returns true if limit exceeded, false otherwise
+ */
+async function checkTierLimit(agentId: string): Promise<{ exceeded: boolean; tier: string; limit: number; usage: number }> {
+  // Get subscription tier
+  const { data: subscription } = await supabase
+    .from('subscriptions')
+    .select('tier, status')
+    .eq('agent_id', agentId)
+    .single()
+
+  const currentTier = subscription?.status === 'active' ? (subscription.tier || 'free') : 'free'
+  
+  const tierLimits: Record<string, number> = {
+    free: 1000,
+    pro: 50000,
+    team: 500000,
+    enterprise: -1 // unlimited
+  }
+
+  const limit = tierLimits[currentTier] || 1000
+  
+  // Enterprise tier has no limit
+  if (limit === -1) {
+    return { exceeded: false, tier: currentTier, limit: Infinity, usage: 0 }
+  }
+
+  const usage = await getAgentUsage(agentId)
+  const exceeded = usage >= limit
+
+  return { exceeded, tier: currentTier, limit, usage }
+}
+
 proxyRoute.post('/call', async (c) => {
   // Extract Bearer token
   const authHeader = c.req.header('Authorization')
@@ -31,6 +86,28 @@ proxyRoute.post('/call', async (c) => {
 
   if (agentError || !agent) {
     return c.json({ error: 'Agent not found' }, 403)
+  }
+
+  // TIER ENFORCEMENT: Check if agent has exceeded their usage limit
+  const tierCheck = await checkTierLimit(agentId)
+  if (tierCheck.exceeded) {
+    // Log tier violation to audit
+    await supabase.from('audit_log').insert({
+      agent_id: agentId,
+      tool_name: 'system',
+      action: 'tier_limit_exceeded',
+      params: { tier: tierCheck.tier, limit: tierCheck.limit, usage: tierCheck.usage },
+      outcome: 'DENY',
+      timestamp: new Date().toISOString()
+    })
+
+    return c.json({ 
+      error: 'Payment Required',
+      reason: `You have exceeded your ${tierCheck.tier} tier limit of ${tierCheck.limit.toLocaleString()} calls per 30 days. Current usage: ${tierCheck.usage.toLocaleString()}. Please upgrade your plan.`,
+      tier: tierCheck.tier,
+      limit: tierCheck.limit,
+      usage: tierCheck.usage
+    }, 402)
   }
 
   // Parse request body: { tool_name, action, params }

@@ -2,6 +2,7 @@
 
 import * as fs from 'fs'
 import * as path from 'path'
+import { Policy } from '@open-policy-agent/opa-wasm'
 
 interface PolicyRequest {
   agent_id: string
@@ -18,20 +19,43 @@ interface PolicyResult {
 
 class PolicyEngine {
   private policies: Map<string, any> = new Map()
+  private wasmPolicies: Map<string, Policy> = new Map()
 
   /**
-   * Load a Rego policy from file or string
+   * Load a Rego policy from WASM bundle
+   * In production, policies are pre-compiled to WASM using: opa build -t wasm policy.rego
    */
-  async loadPolicy(name: string, regoCode: string): Promise<void> {
-    // In production, this would compile Rego to WASM using @open-policy-agent/opa-wasm
-    // For now, we implement a simple policy evaluator
-    
-    const policy = this.parseRego(regoCode)
-    this.policies.set(name, policy)
+  async loadPolicyFromWasm(name: string, wasmPath: string): Promise<void> {
+    try {
+      const wasmBuffer = fs.readFileSync(wasmPath)
+      const policy = await Policy.load(wasmBuffer)
+      this.wasmPolicies.set(name, policy)
+      console.log(`[PolicyEngine] Loaded WASM policy: ${name}`)
+    } catch (error) {
+      console.error(`[PolicyEngine] Failed to load WASM policy ${name}:`, error)
+      throw error
+    }
   }
 
   /**
-   * Simple Rego parser (production would use OPA WASM)
+   * Load a Rego policy from file or string (interpreter fallback)
+   */
+  async loadPolicy(name: string, regoCode: string): Promise<void> {
+    // Try to load WASM policy first if available
+    const wasmPath = path.join(process.cwd(), 'policies', `${name.replace(/\./g, '_')}.wasm`)
+    if (fs.existsSync(wasmPath)) {
+      await this.loadPolicyFromWasm(name, wasmPath)
+      return
+    }
+
+    // Fallback to interpreter mode
+    const policy = this.parseRego(regoCode)
+    this.policies.set(name, policy)
+    console.log(`[PolicyEngine] Loaded interpreted policy: ${name}`)
+  }
+
+  /**
+   * Simple Rego parser (fallback when WASM not available)
    */
   private parseRego(regoCode: string): any {
     // Extract package name
@@ -63,6 +87,33 @@ class PolicyEngine {
   async evaluate(request: PolicyRequest): Promise<PolicyResult> {
     // Find matching policy by package name pattern: agentdevx.tool.{tool_name}.{action}
     const policyKey = `agentdevx.tool.${request.tool_name}.${request.action}`
+    
+    // Try WASM policy first
+    const wasmPolicy = this.wasmPolicies.get(policyKey)
+    if (wasmPolicy) {
+      try {
+        const input = {
+          agent_id: request.agent_id,
+          tool_name: request.tool_name,
+          action: request.action,
+          params: request.params || {},
+          principal_id: request.principal_id
+        }
+        
+        const result = wasmPolicy.evaluate(input)
+        const allow = result?.allow ?? false
+        
+        return {
+          allow,
+          reason: allow ? 'Policy allowed' : 'Policy denied'
+        }
+      } catch (error) {
+        console.error(`[PolicyEngine] WASM evaluation error:`, error)
+        return { allow: false, reason: 'Policy evaluation error' }
+      }
+    }
+
+    // Fallback to interpreter mode
     const policy = this.policies.get(policyKey)
 
     if (!policy) {
@@ -129,6 +180,7 @@ class PolicyEngine {
    */
   clear(): void {
     this.policies.clear()
+    this.wasmPolicies.clear()
   }
 }
 
