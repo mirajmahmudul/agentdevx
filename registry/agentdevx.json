@@ -1,0 +1,29 @@
+{
+  "name": "AgentDevX Gateway",
+  "description": "Universal AI agent tool gateway with credential injection, policy enforcement, and credit-based usage tracking",
+  "version": "1.0.0",
+  "mcp_endpoint": "https://api.agentdevx.dev/mcp",
+  "homepage": "https://agentdevx.dev",
+  "documentation": "https://github.com/mirajmahmudul/agentdevx",
+  "icon": "https://agentdevx.dev/icon.png",
+  "capabilities": [
+    "tool-registry",
+    "credential-injection",
+    "policy-enforcement",
+    "audit-logging",
+    "credit-system"
+  ],
+  "auth": {
+    "type": "bearer",
+    "description": "HS256 JWT token obtained via challenge-response authentication"
+  },
+  "contact": {
+    "email": "support@agentdevx.dev",
+    "github": "https://github.com/mirajmahmudul/agentdevx"
+  },
+  "pricing": {
+    "model": "credits",
+    "free_tier": "75000 credits",
+    "description": "Pay-as-you-go credit system with monthly top-ups"
+  }
+}
