@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentDevX Sign Up</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; min-height: 100vh; display: flex; align-items: center; justify-content: center; }
+        .container { max-width: 500px; width: 100%; padding: 2rem; }
+        .card { background: #1e293b; padding: 2rem; border-radius: 8px; border: 1px solid #334155; }
+        h1 { font-size: 2rem; margin-bottom: 0.5rem; color: #38bdf8; text-align: center; }
+        p { color: #94a3b8; text-align: center; margin-bottom: 2rem; }
+        .form-group { margin-bottom: 1.5rem; }
+        label { display: block; margin-bottom: 0.5rem; color: #e2e8f0; font-weight: 500; }
+        input { width: 100%; padding: 0.75rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; font-size: 1rem; }
+        input:focus { outline: none; border-color: #38bdf8; }
+        button { width: 100%; padding: 0.75rem; background: #38bdf8; border: none; border-radius: 4px; color: #0f172a; font-weight: bold; font-size: 1rem; cursor: pointer; transition: background 0.2s; }
+        button:hover { background: #0ea5e9; }
+        .success { background: #064e3b; border: 1px solid #059669; padding: 1rem; border-radius: 4px; margin-top: 1rem; }
+        .success h3 { color: #34d399; margin-bottom: 0.5rem; }
+        .success code { display: block; background: #0f172a; padding: 0.75rem; border-radius: 4px; margin: 0.5rem 0; word-break: break-all; font-family: monospace; }
+        .error { color: #ef4444; margin-top: 0.5rem; }
+        .back-link { display: block; text-align: center; margin-top: 1.5rem; color: #38bdf8; text-decoration: none; }
+        .back-link:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <h1>🚀 Get Started</h1>
+            <p>Create your AgentDevX account and get 75,000 free credits</p>
+            
+            <form id="signupForm">
+                <div class="form-group">
+                    <label for="email">Email Address</label>
+                    <input type="email" id="email" placeholder="you@example.com" required>
+                </div>
+                <button type="submit">Create Account</button>
+                <p id="error" class="error"></p>
+            </form>
+            
+            <div id="success" class="success" style="display: none;">
+                <h3>✅ Account Created!</h3>
+                <p>Your API Key (save this securely):</p>
+                <code id="apiKey"></code>
+                <p style="color: #94a3b8; font-size: 0.875rem; margin-top: 1rem;">
+                    Use this key to authenticate your agents. You've received 75,000 credits to start.
+                </p>
+            </div>
+            
+            <a href="/" class="back-link">← Back to Dashboard</a>
+        </div>
+    </div>
+    
+    <script>
+        document.getElementById('signupForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const errorEl = document.getElementById('error');
+            const successEl = document.getElementById('success');
+            const apiKeyEl = document.getElementById('apiKey');
+            
+            errorEl.textContent = '';
+            
+            try {
+                const res = await fetch('/users/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email })
+                });
+                
+                const data = await res.json();
+                
+                if (res.ok && data.api_key) {
+                    document.getElementById('signupForm').style.display = 'none';
+                    successEl.style.display = 'block';
+                    apiKeyEl.textContent = data.api_key;
+                } else {
+                    errorEl.textContent = data.error || 'Failed to create account';
+                }
+            } catch (err) {
+                errorEl.textContent = 'Connection error. Please try again.';
+            }
+        });
+    </script>
+</body>
+</html>

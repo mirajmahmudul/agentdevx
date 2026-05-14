@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AgentDevX Admin Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0f172a; color: #e2e8f0; }
+        .container { max-width: 1400px; margin: 0 auto; padding: 2rem; }
+        h1 { font-size: 2rem; margin-bottom: 2rem; color: #38bdf8; }
+        h2 { font-size: 1.5rem; margin: 2rem 0 1rem; color: #7dd3fc; }
+        
+        .login-form { max-width: 400px; margin: 4rem auto; padding: 2rem; background: #1e293b; border-radius: 8px; }
+        .login-form input { width: 100%; padding: 0.75rem; margin-bottom: 1rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; }
+        .login-form button { width: 100%; padding: 0.75rem; background: #38bdf8; border: none; border-radius: 4px; color: #0f172a; font-weight: bold; cursor: pointer; }
+        .login-form button:hover { background: #0ea5e9; }
+        
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 1.5rem; margin-bottom: 2rem; }
+        .stat-card { background: #1e293b; padding: 1.5rem; border-radius: 8px; border-left: 4px solid #38bdf8; }
+        .stat-value { font-size: 2rem; font-weight: bold; color: #38bdf8; }
+        .stat-label { color: #94a3b8; margin-top: 0.5rem; }
+        
+        table { width: 100%; border-collapse: collapse; background: #1e293b; border-radius: 8px; overflow: hidden; margin-bottom: 2rem; }
+        th, td { padding: 1rem; text-align: left; border-bottom: 1px solid #334155; }
+        th { background: #0f172a; color: #38bdf8; font-weight: 600; }
+        tr:hover { background: #334155; }
+        
+        .topup-form { display: flex; gap: 0.5rem; align-items: center; }
+        .topup-form input { padding: 0.5rem; background: #0f172a; border: 1px solid #334155; border-radius: 4px; color: #e2e8f0; width: 120px; }
+        .topup-form button { padding: 0.5rem 1rem; background: #22c55e; border: none; border-radius: 4px; color: white; cursor: pointer; }
+        .topup-form button:hover { background: #16a34a; }
+        
+        .hidden { display: none; }
+        .error { color: #ef4444; margin-top: 0.5rem; }
+        .success { color: #22c55e; margin-top: 0.5rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Login Form -->
+        <div id="loginSection" class="login-form">
+            <h2 style="text-align: center; margin-bottom: 1.5rem;">Admin Login</h2>
+            <form id="loginForm">
+                <input type="email" id="email" placeholder="Email" required value="admin@agentdevx.dev">
+                <input type="password" id="apiKey" placeholder="API Key" required value="admin-secret-key">
+                <button type="submit">Login</button>
+                <p id="loginError" class="error"></p>
+            </form>
+        </div>
+        
+        <!-- Dashboard -->
+        <div id="dashboardSection" class="hidden">
+            <h1>🛡️ Admin Dashboard</h1>
+            
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="stat-value" id="totalUsers">-</div>
+                    <div class="stat-label">Total Users</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="totalAgents">-</div>
+                    <div class="stat-label">Total Agents</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="totalCreditsUsed">-</div>
+                    <div class="stat-label">Credits Used</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-value" id="totalProxies">-</div>
+                    <div class="stat-label">Proxy Calls</div>
+                </div>
+            </div>
+            
+            <h2>👥 Users</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Email</th>
+                        <th>Credits</th>
+                        <th>Agents</th>
+                        <th>Joined</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="usersTable"></tbody>
+            </table>
+            
+            <h2>📋 Recent Audit Log</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Agent</th>
+                        <th>Tool</th>
+                        <th>Action</th>
+                        <th>Outcome</th>
+                    </tr>
+                </thead>
+                <tbody id="auditTable"></tbody>
+            </table>
+        </div>
+    </div>
+    
+    <script>
+        const SUPABASE_URL = window.location.origin.replace('3000', '54321'); // Adjust if needed
+        let adminToken = localStorage.getItem('adminToken');
+        
+        async function checkAuth() {
+            if (!adminToken) {
+                showLogin();
+                return false;
+            }
+            
+            try {
+                const res = await fetch('/users/me', {
+                    headers: { 'Authorization': `Bearer ${adminToken}` }
+                });
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.role === 'admin') {
+                        showDashboard();
+                        loadDashboard();
+                        return true;
+                    }
+                }
+                localStorage.removeItem('adminToken');
+                showLogin();
+                return false;
+            } catch {
+                showLogin();
+                return false;
+            }
+        }
+        
+        function showLogin() {
+            document.getElementById('loginSection').classList.remove('hidden');
+            document.getElementById('dashboardSection').classList.add('hidden');
+        }
+        
+        function showDashboard() {
+            document.getElementById('loginSection').classList.add('hidden');
+            document.getElementById('dashboardSection').classList.remove('hidden');
+        }
+        
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('email').value;
+            const apiKey = document.getElementById('apiKey').value;
+            
+            try {
+                const res = await fetch('/users/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ email, api_key: apiKey })
+                });
+                
+                const data = await res.json();
+                if (res.ok && data.token) {
+                    localStorage.setItem('adminToken', data.token);
+                    adminToken = data.token;
+                    showDashboard();
+                    loadDashboard();
+                } else {
+                    document.getElementById('loginError').textContent = data.error || 'Login failed';
+                }
+            } catch (err) {
+                document.getElementById('loginError').textContent = 'Connection error';
+            }
+        });
+        
+        async function loadDashboard() {
+            await Promise.all([loadStats(), loadUsers(), loadAuditLog()]);
+        }
+        
+        async function loadStats() {
+            try {
+                const [usersRes, agentsRes, auditRes] = await Promise.all([
+                    fetch('/admin/stats/users', { headers: { 'Authorization': `Bearer ${adminToken}` } }),
+                    fetch('/admin/stats/agents', { headers: { 'Authorization': `Bearer ${adminToken}` } }),
+                    fetch('/admin/stats/credits', { headers: { 'Authorization': `Bearer ${adminToken}` } })
+                ]);
+                
+                const users = await usersRes.json();
+                const agents = await agentsRes.json();
+                const credits = await creditsRes.json();
+                
+                document.getElementById('totalUsers').textContent = users.count || 0;
+                document.getElementById('totalAgents').textContent = agents.count || 0;
+                document.getElementById('totalCreditsUsed').textContent = credits.used || 0;
+                document.getElementById('totalProxies').textContent = auditRes.ok ? (await auditRes.json()).count || 0 : 0;
+            } catch {}
+        }
+        
+        async function loadUsers() {
+            try {
+                const res = await fetch('/admin/users', {
+                    headers: { 'Authorization': `Bearer ${adminToken}` }
+                });
+                const users = await res.json();
+                
+                const tbody = document.getElementById('usersTable');
+                tbody.innerHTML = users.map(user => `
+                    <tr>
+                        <td>${user.email}</td>
+                        <td>${user.credits_balance || 0}</td>
+                        <td>${user.agent_count || 0}</td>
+                        <td>${new Date(user.created_at).toLocaleDateString()}</td>
+                        <td>
+                            <form class="topup-form" onsubmit="topupCredits(event, '${user.id}')">
+                                <input type="number" name="amount" placeholder="Amount" min="1" required>
+                                <button type="submit">Top-up</button>
+                            </form>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch {}
+        }
+        
+        async function topupCredits(e, userId) {
+            e.preventDefault();
+            const amount = parseInt(e.target.amount.value);
+            
+            try {
+                const res = await fetch('/admin/credits/topup', {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${adminToken}`
+                    },
+                    body: JSON.stringify({ user_id: userId, amount })
+                });
+                
+                if (res.ok) {
+                    alert('Credits added successfully!');
+                    loadUsers();
+                    loadStats();
+                } else {
+                    const data = await res.json();
+                    alert(data.error || 'Failed to add credits');
+                }
+            } catch {
+                alert('Connection error');
+            }
+        }
+        
+        async function loadAuditLog() {
+            try {
+                const res = await fetch('/admin/audit/recent?limit=20', {
+                    headers: { 'Authorization': `Bearer ${adminToken}` }
+                });
+                const logs = await res.json();
+                
+                const tbody = document.getElementById('auditTable');
+                tbody.innerHTML = logs.map(log => `
+                    <tr>
+                        <td>${new Date(log.timestamp).toLocaleString()}</td>
+                        <td>${log.agent_id}</td>
+                        <td>${log.tool_name}</td>
+                        <td>${log.action}</td>
+                        <td style="color: ${log.outcome === 'ALLOW' ? '#22c55e' : log.outcome === 'DENY' ? '#ef4444' : '#fbbf24'}">${log.outcome}</td>
+                    </tr>
+                `).join('');
+            } catch {}
+        }
+        
+        // Initialize
+        checkAuth();
+    </script>
+</body>
+</html>
