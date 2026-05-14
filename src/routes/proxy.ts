@@ -80,12 +80,65 @@ proxyRoute.post('/call', async (c) => {
   // Verify agent still exists
   const { data: agent, error: agentError } = await supabase
     .from('agents')
-    .select('id')
+    .select('id, owner_id')
     .eq('id', agentId)
     .single()
 
   if (agentError || !agent) {
     return c.json({ error: 'Agent not found' }, 403)
+  }
+
+  // CREDIT CHECK: Get the user's credit balance and deduct if sufficient
+  const ownerId = agent.owner_id;
+  
+  // Query credits for this user
+  const { data: credits, error: creditsError } = await supabase
+    .from('credits')
+    .select('balance')
+    .eq('user_id', ownerId)
+    .single();
+
+  if (creditsError || !credits) {
+    // No credits found - could be an old agent without a user
+    // For backward compatibility, allow the request but log a warning
+    console.warn(`No credits found for user ${ownerId}, allowing request for backward compatibility`);
+  } else if (credits.balance <= 0) {
+    // Insufficient credits
+    await supabase.from('audit_log').insert({
+      agent_id: agentId,
+      tool_name: 'system',
+      action: 'insufficient_credits',
+      params: { balance: credits.balance, owner_id: ownerId },
+      outcome: 'DENY',
+      timestamp: new Date().toISOString()
+    });
+
+    return c.json({ 
+      error: 'Insufficient credits',
+      reason: 'Your credit balance is 0. Please contact your administrator to add more credits.',
+      balance: 0
+    }, 402);
+  } else {
+    // Deduct 1 credit atomically
+    const { error: deductionError } = await supabase
+      .from('credits')
+      .update({ balance: supabase.raw('balance - 1') })
+      .eq('user_id', ownerId)
+      .gt('balance', 0); // Ensure balance is still positive
+
+    if (deductionError) {
+      console.error('Credit deduction error:', deductionError);
+    } else {
+      // Log credit deduction to audit
+      await supabase.from('audit_log').insert({
+        agent_id: agentId,
+        tool_name: 'system',
+        action: 'credit_deduction',
+        params: { previous_balance: credits.balance, owner_id: ownerId },
+        outcome: 'ALLOW',
+        timestamp: new Date().toISOString()
+      });
+    }
   }
 
   // TIER ENFORCEMENT: Check if agent has exceeded their usage limit
