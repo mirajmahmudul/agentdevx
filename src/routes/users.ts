@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { supabase } from '../db.js';
-import { signJWT } from '../auth/jwt.js';
+import { signJWT, verifyToken } from '../auth/jwt.js';
 
 type UserRegisterRequest = {
   email: string;
@@ -17,6 +17,31 @@ type TopupRequest = {
 };
 
 const users = new Hono();
+
+/**
+ * Middleware to check admin role
+ */
+async function requireAdmin(c: any, next: () => Promise<void>) {
+  const authHeader = c.req.header('Authorization');
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return c.json({ error: 'Authorization header required' }, 401);
+  }
+
+  const token = authHeader.substring(7);
+  const payload = await verifyToken(token);
+  
+  if (!payload) {
+    return c.json({ error: 'Invalid or expired token' }, 401);
+  }
+
+  if (payload.role !== 'admin') {
+    return c.json({ error: 'Admin access required' }, 403);
+  }
+
+  c.set('userId', payload.sub);
+  c.set('userRole', payload.role);
+  await next();
+}
 
 /**
  * POST /users/register
@@ -137,14 +162,13 @@ users.get('/me', async (c) => {
     }
 
     const token = authHeader.substring(7);
+    const payload = await verifyToken(token);
     
-    // We need to verify the JWT - for now we'll extract user_id from context
-    // In production, you'd verify the JWT here
-    const userId = c.get('userId'); // Set by middleware in index.ts
-    
-    if (!userId) {
-      return c.json({ error: 'Invalid or missing token' }, 401);
+    if (!payload) {
+      return c.json({ error: 'Invalid or expired token' }, 401);
     }
+
+    const userId = payload.sub as string;
 
     // Get user info
     const { data: user } = await supabase
@@ -169,7 +193,8 @@ users.get('/me', async (c) => {
       email: user.email,
       created_at: user.created_at,
       credits: credits?.balance ?? 0,
-      credits_updated: credits?.updated_at
+      credits_updated: credits?.updated_at,
+      role: payload.role
     });
   } catch (error) {
     console.error('Get user error:', error);
@@ -181,21 +206,8 @@ users.get('/me', async (c) => {
  * POST /admin/credits/topup
  * Admin endpoint to add credits to a user
  */
-users.post('/admin/credits/topup', async (c) => {
+users.post('/admin/credits/topup', requireAdmin, async (c) => {
   try {
-    // Check admin authorization
-    const authHeader = c.req.header('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return c.json({ error: 'Authorization header required' }, 401);
-    }
-
-    const token = authHeader.substring(7);
-    const userRole = c.get('userRole'); // Set by middleware
-    
-    if (userRole !== 'admin') {
-      return c.json({ error: 'Admin access required' }, 403);
-    }
-
     const body = await c.req.json<TopupRequest>();
     const { user_id, amount } = body;
 
@@ -239,6 +251,141 @@ users.post('/admin/credits/topup', async (c) => {
     });
   } catch (error) {
     console.error('Topup error:', error);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+});
+
+/**
+ * GET /admin/stats/users
+ * Get total user count
+ */
+users.get('/admin/stats/users', requireAdmin, async (c) => {
+  try {
+    const { count, error } = await supabase
+      .from('users')
+      .select('*', { count: 'exact', head: true });
+
+    if (error) {
+      return c.json({ error: 'Failed to get user count' }, 500);
+    }
+
+    return c.json({ count: count || 0 });
+  } catch (error) {
+    console.error('Stats error:', error);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+});
+
+/**
+ * GET /admin/stats/agents
+ * Get total agent count
+ */
+users.get('/admin/stats/agents', requireAdmin, async (c) => {
+  try {
+    const { count, error } = await supabase
+      .from('agents')
+      .select('*', { count: 'exact', head: true });
+
+    if (error) {
+      return c.json({ error: 'Failed to get agent count' }, 500);
+    }
+
+    return c.json({ count: count || 0 });
+  } catch (error) {
+    console.error('Stats error:', error);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+});
+
+/**
+ * GET /admin/stats/credits
+ * Get total credits used
+ */
+users.get('/admin/stats/credits', requireAdmin, async (c) => {
+  try {
+    // Total credits allocated
+    const { data: totalData } = await supabase
+      .from('credits')
+      .select('balance');
+    
+    const totalAllocated = totalData?.reduce((sum, c) => sum + c.balance, 0) || 0;
+    const initialAllocation = 75000 * (totalData?.length || 0);
+    const used = initialAllocation - totalAllocated;
+
+    return c.json({ 
+      total_allocated: totalAllocated,
+      used: Math.max(0, used)
+    });
+  } catch (error) {
+    console.error('Stats error:', error);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+});
+
+/**
+ * GET /admin/users
+ * List all users with their credit balances and agent counts
+ */
+users.get('/admin/users', requireAdmin, async (c) => {
+  try {
+    const { data: users, error } = await supabase
+      .from('users')
+      .select('id, email, created_at');
+
+    if (error) {
+      return c.json({ error: 'Failed to get users' }, 500);
+    }
+
+    // Enrich each user with credits and agent count
+    const enrichedUsers = await Promise.all(
+      (users || []).map(async (user) => {
+        const { data: credits } = await supabase
+          .from('credits')
+          .select('balance')
+          .eq('user_id', user.id)
+          .single();
+
+        const { count } = await supabase
+          .from('agents')
+          .select('*', { count: 'exact', head: true })
+          .eq('owner_id', user.id);
+
+        return {
+          ...user,
+          credits_balance: credits?.balance ?? 0,
+          agent_count: count || 0
+        };
+      })
+    );
+
+    return c.json(enrichedUsers);
+  } catch (error) {
+    console.error('Get users error:', error);
+    return c.json({ error: 'Internal server error' }, 500);
+  }
+});
+
+/**
+ * GET /admin/audit/recent
+ * Get recent audit log entries
+ */
+users.get('/admin/audit/recent', requireAdmin, async (c) => {
+  try {
+    const limit = parseInt(c.req.query('limit') || '20');
+    
+    const { data: logs, error } = await supabase
+      .from('audit_log')
+      .select('*')
+      .order('timestamp', { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      return c.json({ error: 'Failed to get audit log' }, 500);
+    }
+
+    return c.json(logs || []);
+  } catch (error) {
+    console.error('Audit error:', error);
     return c.json({ error: 'Internal server error' }, 500);
   }
 });
