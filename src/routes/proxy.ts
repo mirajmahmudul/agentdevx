@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { verifyToken } from '../auth/jwt'
 import { supabase } from '../db'
 import { decryptSecret } from '../services/credential-vault'
-import { policyEngine } from '../policy/engine'
+import policyEngine from '../policy/engine'
 
 const proxyRoute = new Hono()
 

@@ -132,4 +132,5 @@ class PolicyEngine {
 
 const policyEngine = new PolicyEngine()
 
-export { policyEngine, PolicyEngine }
+export default policyEngine
+export { PolicyEngine }

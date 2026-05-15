@@ -2,56 +2,53 @@
 # Dependencies
 node_modules/
 
-# Environment variables
+# Environment
 .env
+.env.local
+.env.*
+
+# Logs and temp files
+*.log
+*.tmp
+
+# Editors
+.vscode/
 
 # Build artifacts
 dist/
 build/
-*.js.map
-*.d.ts.map
+target/
 
-# TypeScript
-*.tsbuildinfo
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+.egg-info/
+*.egg
 
-# IDE
-.vscode/
-.idea/
+# Compiled files
+*.o
+*.obj
+*.so
+*.a
+*.dll
+*.exe
+*.out
 
-# Logs
-*.log
+# Cache directories
+.cache/
+.mypy_cache/
+.pytest_cache/
+.coverage
+coverage/
+htmlcov/
 
-# Temporary files
-*.tmp
-*.swp
-*.swo
-
-# OS
+# System files
 .DS_Store
 Thumbs.db
-
-# Compression
-*.zip
-*.gz
-*.tar
-*.tgz
-*.bz2
-*.xz
-*.7z
-*.rar
-*.zst
-*.lz4
-*.lzh
-*.cab
-*.arj
-*.rpm
-*.deb
-*.Z
-*.lz
-*.lzo
-*.tar.gz
-*.tar.bz2
-*.tar.xz
-*.tar.zst
-
-```node_modules/
+```

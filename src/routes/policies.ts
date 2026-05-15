@@ -2,7 +2,7 @@
 
 import { Hono } from 'hono'
 import { supabase } from '../db'
-import { policyEngine } from '../policy/engine'
+import policyEngine from '../policy/engine'
 
 const policiesRoute = new Hono()
 
